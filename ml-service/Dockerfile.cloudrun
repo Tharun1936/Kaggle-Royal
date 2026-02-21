@@ -1,0 +1,36 @@
+FROM python:3.9-slim
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    gcc \
+    g++ \
+    libpcap-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements
+COPY requirements.txt .
+
+# Install Python dependencies
+RUN pip install --no-cache-dir -r requirements.txt gunicorn
+
+# Copy application code
+COPY . .
+
+# Create uploads directory
+RUN mkdir -p /tmp/uploads
+
+# Expose port 8080 for Cloud Run
+EXPOSE 8080
+
+# Create startup script to read PORT env var (Cloud Run sets PORT=8080)
+RUN echo '#!/bin/sh\nPORT=${PORT:-8080}\nexec gunicorn app:app --bind "0.0.0.0:$PORT" --workers 2 --timeout 120 --access-logfile - --error-logfile -' > /app/start.sh && \
+    chmod +x /app/start.sh
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
+  CMD python -c "import os; import urllib.request; port = os.environ.get('PORT', '8080'); urllib.request.urlopen(f'http://localhost:{port}/api/health')" || exit 1
+
+# Start with Gunicorn using PORT env var
+CMD ["/app/start.sh"]
